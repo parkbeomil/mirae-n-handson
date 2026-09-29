@@ -147,3 +147,10 @@ test/        mockFetch.ts(fetch 가짜) · fixtures.ts
   - `.claude/skills` · `.claude/agents` · `.claude/settings.json`
   - `hooks/*.mjs`
   - `characterization/tests/*.test.js`
+
+## 5. 완료 기준
+
+- 이관 · 리팩토링 작업은 `cd characterization && npm test` 가 전부 통과하기 전에는 완료라고 보고하지 않는다.
+- 테스트가 실패하면 실패한 케이스와 기대값 · 실제값 차이를 그대로 보고한다. 요약해서 "거의 됐다"고 말하지 않는다.
+- 테스트를 통과시키려고 `characterization/` 의 테스트 코드나 스냅샷 파일을 고치지 않는다. 스냅샷을 바꿔야 한다고 판단되면 멈추고 사람에게 묻는다.
+- 레거시 동작이 버그로 보여도 이관 중에는 고치지 않는다. "의심 동작" 목록으로 따로 보고한다.
