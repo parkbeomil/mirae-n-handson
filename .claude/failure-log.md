@@ -34,3 +34,14 @@ attempts:
   - 1차: `:29-36` · `:541-563` 을 파일명 없이 적어 직전 참조(`inc/db.php`)로 읽힘. 의도는 `search.php`
 root_cause: 앞 bullet 이 다른 파일을 가리킨 뒤 파일명 없이 `:N` 만 써서 참조 문맥이 바뀜
 ---
+
+---
+date: 2026-09-29
+stage: verify
+category: test-config
+task: modern/api ItemSearchRepositoryTest 에서 H2 에 v_item_public 뷰를 @Sql(statements) 로 생성
+detected_by: ./gradlew test (ItemSearchRepositoryTest 7건 ScriptStatementFailedException)
+attempts:
+  - 1차: 여러 줄 텍스트 블록 한 문장을 `;` 없이 넣음 → 구분자가 줄바꿈으로 잡혀 "CREATE OR REPLACE VIEW v_item_public AS" 에서 끊김. 끝에 `;` 를 붙여 통과
+root_cause: @Sql 인라인 문장에 `;` 가 없으면 ScriptUtils 가 줄바꿈을 문장 구분자로 쓴다는 점을 확인하지 않음
+---
