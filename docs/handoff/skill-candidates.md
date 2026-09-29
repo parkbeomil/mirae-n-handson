@@ -2,7 +2,7 @@
 
 - 작성일: 2026-09-29
 - 배경: 루트 `CLAUDE.md` 재작성(커밋 `3d5493f`) 때 "단계가 여러 개인 절차는 파일에 넣지 않는다"는 기준으로 뺀 절차들이다. 각 후보를 `.claude/skills/<이름>/SKILL.md` 로 만들 때 이 문서를 출발점으로 쓴다.
-- 상태: 후보 목록만 있다. 아직 Skill 파일은 하나도 만들지 않았다.
+- 상태: 후보 목록만 있다. 이 문서의 후보는 아직 Skill로 만들지 않았다. 별도로 만든 `convention-check` Skill(코드 규칙 점검)을 1번이 호출한다.
 - 공통 원칙: 규칙 자체(무엇을 지키는가)는 `CLAUDE.md` 에 남아 있다. Skill에는 그 규칙을 지키는 **순서**만 담고, 규칙 문장을 다시 복사하지 않는다.
 
 ## 1. 작업 완료 검증 (`modern/*`)
@@ -11,10 +11,9 @@
 - 절차:
   1. 바꾼 모듈의 검사를 실행한다. api는 `./gradlew test`, web은 `npm run lint && npm run typecheck && npm test`.
   2. 통과 · 실패 수를 기록한다. 실패가 1건이라도 있으면 완료로 보고하지 않는다.
-  3. 금지 패턴을 grep한다: 컨트롤러의 `*Repository` · SQL 문자열, 빈 `catch`, `System.out` · `printStackTrace`, `fetch(`(`client.ts` 밖), `any` · `@ts-ignore`, `console.log`.
+  3. `/convention-check` 를 실행한다. 금지 패턴과 승인 필요 파일 변경은 이 Skill이 점검한다(`.claude/skills/convention-check/SKILL.md`).
   4. `git diff --name-only` 로 변경 파일이 요청 범위 안인지 확인한다. 범위 밖 파일은 이유를 적는다.
-  5. `build.gradle` · `package.json` · `package-lock.json` · `application.yml` · 스키마 · 시드 파일 변경 여부와 사전 승인 여부를 확인한다.
-  6. 바꾼 동작마다 대응 테스트가 추가 · 수정되었는지 대조한다.
+  5. 바꾼 동작마다 대응 테스트가 추가 · 수정되었는지 대조한다.
 - 재료: `templates/CLAUDE.spring.md` §5, `templates/CLAUDE.react.md` §5, `templates/approval-checklist.md`, `templates/verification-loop.md`
 
 ## 2. 새 조회 API 추가 (`modern/api`)
