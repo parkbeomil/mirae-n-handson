@@ -45,3 +45,40 @@ attempts:
   - 1차: 여러 줄 텍스트 블록 한 문장을 `;` 없이 넣음 → 구분자가 줄바꿈으로 잡혀 "CREATE OR REPLACE VIEW v_item_public AS" 에서 끊김. 끝에 `;` 를 붙여 통과
 root_cause: @Sql 인라인 문장에 `;` 가 없으면 ScriptUtils 가 줄바꿈을 문장 구분자로 쓴다는 점을 확인하지 않음
 ---
+
+---
+date: 2026-10-06
+stage: review
+category: doc-accuracy
+task: docs/rca/a-connection-pool.md 수집 범위 절 작성
+detected_by: advisor 검토(작성 완료 직전) + 직접 재집계
+attempts:
+  - 1차: 세지 않은 줄 수("약 800줄", "약 2,400줄")와 틀린 분당 요청 범위(32~58건)를 문서에 먼저 적음. 실측 710줄 · 2,438줄 · 32~56건으로 고침
+  - 2차: 평소 WARN 유형을 `head -n 8` 으로 잘린 출력만 보고 "16건 전부 409" 라고 적음. 전수 grep 으로 16건 모두 409 임을 확인
+root_cause: 집계하지 않은 수치와 잘린 출력을 근거로 문서에 먼저 적음
+---
+
+---
+date: 2026-10-06
+stage: review
+category: doc-accuracy
+task: docs/rca/a-connection-pool.md 3절(가설과 검증) 작성
+detected_by: advisor 검토(작성 완료 직전) + 직접 재집계
+attempts:
+  - 1차: "가장 많이 나온 메시지는 Connection is not available" 를 세지 않고 적음. 이벤트 기준 실측은 ProxyLeakTask WARN 134 > 풀 ERROR 49. 센 기준을 밝혀 다시 씀
+  - 2차: 슬로우 로그 `Lock_time` 줄(`mariadb-slow.log:18`)을 `:15` 로, 1절 시각 정리(`a-connection-pool.md:80`)를 `:82` 로 확인 없이 적음. 직접 grep 으로 바로잡음
+  - 3차: 로그에서 확인하지 못한 `long_query_time` 값(2초)을 반증 조건에 단정해 적고, 판정처럼 읽히는 표현("무게가 옮겨 간다")을 넣음
+root_cause: 집계하지 않은 수치 · 확인하지 않은 줄번호를 근거로 문서에 먼저 적음
+---
+
+---
+date: 2026-10-06
+stage: review
+category: doc-accuracy
+task: docs/verify/migration-review-3.md 이슈 · 확인 필요 절 작성
+detected_by: 직접 grep 재확인 + advisor 검토
+attempts:
+  - 1차: 레거시 경고 문구 줄번호를 `search.php:223` 으로 확인 없이 적음. grep 결과 225
+  - 2차: 앞 bullet 이 다른 파일(`ItemSearchService.java`)을 가리킨 뒤 파일명 없이 `:34` · `:65` 를 씀. `$warnings[] =` 줄 수를 "14종"(문구 수)로 적음
+root_cause: 집계하지 않은 수치 · 확인하지 않은 줄번호를 근거로 문서에 먼저 적음
+---
