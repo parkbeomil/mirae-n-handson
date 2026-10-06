@@ -27,6 +27,42 @@ server.registerTool(
 // - 감쌀 API 는 ./itemApi.js 에 있다 (ESM 이라 확장자를 .js 로 적는다)
 // - import 문도 이 자리에 함께 붙여 넣어도 된다
 // ================================================================
+import * as z from 'zod/v4';
+import { searchItems } from './itemApi.js';
+
+const MAX_LIMIT = 20;
+const DEFAULT_LIMIT = 5;
+
+server.registerTool(
+  'search_items',
+  {
+    description:
+      '문항 은행에서 문항을 검색한다. 사용자가 특정 주제·키워드·단원·난이도의 문제나 문항을 찾거나 ' +
+      '추천해 달라고 할 때 사용한다. 문항 본문과 태그에서 keyword 를 찾는다. ' +
+      '문항을 수정하거나 등록하는 용도로는 쓰지 않는다(조회 전용).',
+    inputSchema: z.object({
+      keyword: z.string().describe('검색어. 문항 본문 또는 태그에 포함된 단어 (예: "분수", "서술형")'),
+      unit: z.string().optional().describe('단원 코드(예: "M5-1") 또는 단원 이름 일부(예: "분수의 곱셈"). 생략하면 전체 단원'),
+      difficulty: z.enum(['하', '중', '상']).optional().describe('난이도: 하, 중, 상 중 하나. 생략하면 전체 난이도'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(MAX_LIMIT)
+        .default(DEFAULT_LIMIT)
+        .describe(`돌려줄 최대 문항 수. 1~${MAX_LIMIT}, 기본 ${DEFAULT_LIMIT}`)
+    })
+  },
+  async ({ keyword, unit, difficulty, limit }) => {
+    console.error(`search_items keyword=${keyword} unit=${unit ?? '-'} difficulty=${difficulty ?? '-'} limit=${limit}`);
+    const found = await searchItems({ keyword, unit, difficulty, limit });
+    const payload =
+      found.length === 0 ? { message: '검색 결과 없음', condition: { keyword, unit, difficulty, limit } } : found;
+    return {
+      content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }]
+    };
+  }
+);
 
 async function main() {
   const transport = new StdioServerTransport();
