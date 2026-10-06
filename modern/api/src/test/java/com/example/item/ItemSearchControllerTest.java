@@ -9,8 +9,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.net.URI;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -69,17 +69,15 @@ class ItemSearchControllerTest {
     }
 
     @Test
-    @DisplayName("파라미터는 이름 · 값 그대로(level[] 배열 포함) 서비스에 넘긴다")
-    @SuppressWarnings("unchecked")
-    void passesRawParamsToService() throws Exception {
+    @DisplayName("쿼리 문자열은 디코딩하지 않고 순서 그대로(level[] 배열 포함) 서비스에 넘긴다")
+    void passesRawQueryToService() throws Exception {
         when(itemSearchService.search(any())).thenReturn(new ItemSearchResponse(List.of(), 0, "검색 결과가 없습니다"));
 
-        mockMvc.perform(get("/api/items/search").param("level[]", "5", "1").param("page", "-1"))
+        mockMvc.perform(get(URI.create("/api/items/search?level%5B%5D=5&level=1&page=-1")))
             .andExpect(status().isOk());
 
-        ArgumentCaptor<Map<String, List<String>>> captor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
         verify(itemSearchService).search(captor.capture());
-        assertThat(captor.getValue().get("level[]")).containsExactly("5", "1");
-        assertThat(captor.getValue().get("page")).containsExactly("-1");
+        assertThat(captor.getValue()).isEqualTo("level%5B%5D=5&level=1&page=-1");
     }
 }

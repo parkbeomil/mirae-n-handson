@@ -6,8 +6,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.example.item.ItemSearchCondition.SortKey;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,10 +32,21 @@ class ItemSearchServiceTest {
     @InjectMocks
     private ItemSearchService itemSearchService;
 
+    /** 이름 · 값을 퍼센트 인코딩한 쿼리 문자열로 만들어 넘긴다(같은 이름의 값 순서는 유지, 이름 사이 순서는 보장하지 않는다). */
     private ItemSearchCondition searchWith(Map<String, List<String>> params) {
+        return searchWithQuery(params.entrySet().stream()
+            .flatMap(entry -> entry.getValue().stream().map(value -> encode(entry.getKey()) + "=" + encode(value)))
+            .collect(Collectors.joining("&")));
+    }
+
+    private static String encode(String text) {
+        return URLEncoder.encode(text, StandardCharsets.UTF_8);
+    }
+
+    private ItemSearchCondition searchWithQuery(String rawQuery) {
         when(itemSearchRepository.count(any())).thenReturn(1L);
         when(itemSearchRepository.findPage(any())).thenReturn(List.of());
-        itemSearchService.search(params);
+        itemSearchService.search(rawQuery);
         ArgumentCaptor<ItemSearchCondition> captor = ArgumentCaptor.forClass(ItemSearchCondition.class);
         verify(itemSearchRepository).count(captor.capture());
         return captor.getValue();
@@ -57,8 +71,8 @@ class ItemSearchServiceTest {
         when(itemSearchRepository.count(any())).thenReturn(0L, 20L);
         when(itemSearchRepository.findPage(any())).thenReturn(List.of(), List.of());
 
-        ItemSearchResponse empty = itemSearchService.search(Map.of("unit", List.of("Z9-99")));
-        ItemSearchResponse emptyPage = itemSearchService.search(Map.of("page", List.of("2")));
+        ItemSearchResponse empty = itemSearchService.search("unit=Z9-99");
+        ItemSearchResponse emptyPage = itemSearchService.search("page=2");
 
         assertThat(empty.count()).isZero();
         assertThat(empty.message()).isEqualTo("검색 결과가 없습니다");
@@ -140,6 +154,49 @@ class ItemSearchServiceTest {
         ItemSearchCondition condition = searchWith(Map.of("level", List.of("3", "4")));
 
         assertThat(condition.level()).isEqualTo(4L);
+    }
+
+    @ParameterizedTest(name = "{0} → level={1}")
+    @CsvSource({
+        "level%5B%5D=5&level=1, 1",
+        "level=1&level%5B%5D=5, 5",
+        "level%5B%5D=5&level=1&level%5B%5D=2, 2",
+        "level%5B1%5D=2&level%5B%5D=3, 2",
+        "level%5Bx%5D=4&level%5By%5D=3, 4",
+        "level%5Bx%5D=4&level%5By%5D=3&level%5Bx%5D=2, 2",
+        "level%5B%5D%5B%5D=5, 0",
+        "level%5B0%5D%5Bx%5D=5, 0",
+    })
+    @DisplayName("같은 이름은 쿼리 순서대로 덮어쓰고, 배열은 첫 요소를 쓴다(키 있는 배열 · 두 겹 배열은 \"Array\" → 0)")
+    void followsQueryOrderLikePhp(String rawQuery, long expected) {
+        ItemSearchCondition condition = searchWithQuery(rawQuery);
+
+        assertThat(condition.level()).isEqualTo(expected);
+    }
+
+    @ParameterizedTest(name = "{0} → q=[{1}]")
+    @CsvSource({
+        "q=a+b%20c, a b c",
+        "q=%ZZ%41, %ZZA",
+        "q=100%, 100%",
+        "q=%E2%82%AC, €",
+        "q%5Bx%5D=a%2C&q%5By%5D=b, 'a,'",
+    })
+    @DisplayName("값은 PHP urldecode 처럼 풀고, 16진수가 아닌 %는 그대로 둔다")
+    void decodesLikePhpUrldecode(String rawQuery, String expected) {
+        ItemSearchCondition condition = searchWithQuery(rawQuery);
+
+        assertThat(condition.keyword()).isEqualTo(expected);
+    }
+
+    @Test
+    @DisplayName("쿼리 문자열이 없으면 파라미터가 없는 것과 같다")
+    void treatsMissingQueryAsNoParams() {
+        ItemSearchCondition condition = searchWithQuery(null);
+
+        assertThat(condition.keyword()).isNull();
+        assertThat(condition.level()).isNull();
+        assertThat(condition.page()).isEqualTo(1);
     }
 
     @ParameterizedTest(name = "sort={0}, dir={1} → {2} desc={3}")

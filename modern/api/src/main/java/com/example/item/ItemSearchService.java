@@ -1,6 +1,11 @@
 package com.example.item;
 
 import com.example.item.ItemSearchCondition.SortKey;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -38,22 +43,36 @@ public class ItemSearchService {
     private static final Pattern PHP_NUMERIC_PREFIX =
         Pattern.compile("[ \\t\\n\\r\\u000B\\f]*([+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?)");
 
+    /** PHP 배열에서 정수 키로 쓰이는 형태(앞자리 0 없는 10진수, long 범위 안). {@code []} 로 덧붙일 번호를 셀 때 쓴다. */
+    private static final Pattern PHP_INT_KEY = Pattern.compile("0|-?[1-9][0-9]{0,17}");
+
+    /** 두 겹 이상 배열인 요소의 표시. 첫 요소가 이것이면 PHP 는 문자열 변환으로 "Array" 를 쓴다. */
+    private static final Object NESTED_ARRAY = new Object();
+    private static final String PHP_ARRAY_STRING = "Array";
+
+    private static final int HEX_RADIX = 16;
+    private static final int HEX_DIGITS = 2;
+    private static final int BYTE_MASK = 0xFF;
+
     private final ItemSearchRepository itemSearchRepository;
 
     public ItemSearchService(ItemSearchRepository itemSearchRepository) {
         this.itemSearchRepository = itemSearchRepository;
     }
 
-    /** 문항 검색. 전체 건수가 0이면 안내 문구를 함께 돌려준다. */
-    public ItemSearchResponse search(Map<String, List<String>> params) {
-        ItemSearchCondition condition = toCondition(params);
+    /**
+     * 문항 검색. {@code rawQuery} 는 디코딩하기 전의 쿼리 문자열(없으면 {@code null})이다.
+     * 전체 건수가 0이면 안내 문구를 함께 돌려준다.
+     */
+    public ItemSearchResponse search(String rawQuery) {
+        ItemSearchCondition condition = toCondition(parseQuery(rawQuery));
         long total = itemSearchRepository.count(condition);
         List<ItemSearchRow> rows = itemSearchRepository.findPage(condition);
         log.debug("item search matched {} items, page {}", total, condition.page());
         return new ItemSearchResponse(rows, total, total == 0 ? NO_RESULT_MESSAGE : null);
     }
 
-    private static ItemSearchCondition toCondition(Map<String, List<String>> params) {
+    private static ItemSearchCondition toCondition(Map<String, Object> params) {
         String sort = asciiLower(phpTrim(param(params, "sort", "")));
         String dir = asciiLower(phpTrim(param(params, "dir", "")));
         if (!dir.equals("asc") && !dir.equals("desc")) {
@@ -70,17 +89,109 @@ public class ItemSearchService {
             page(param(params, "page", "1")));
     }
 
-    /** 파라미터 값. {@code name[]} 배열이면 첫 값, 같은 이름이 반복되면 마지막 값(PHP $_GET 과 같다). */
-    private static String param(Map<String, List<String>> params, String name, String defaultValue) {
-        List<String> arrayValues = params.get(name + "[]");
-        if (arrayValues != null && !arrayValues.isEmpty()) {
-            return arrayValues.get(0);
+    /** 파라미터 값. 배열이면 첫 요소(두 겹 배열이면 "Array"), 같은 이름은 마지막 대입이 이긴다(legacy/item-bank-php/search.php:52-81). */
+    private static String param(Map<String, Object> params, String name, String defaultValue) {
+        Object value = params.get(name);
+        if (value == null) {
+            return defaultValue;
         }
-        List<String> values = params.get(name);
-        if (values != null && !values.isEmpty()) {
-            return values.get(values.size() - 1);
+        if (value instanceof Map<?, ?> array) {
+            Object first = array.values().iterator().next();
+            return first instanceof String text ? text : PHP_ARRAY_STRING;
         }
-        return defaultValue;
+        return (String) value;
+    }
+
+    /**
+     * 쿼리 문자열로 PHP {@code $_GET} 을 채우는 규칙을 옮겼다. 토큰을 앞에서부터 읽으므로 {@code level[]=5&level=1} 과
+     * {@code level=1&level[]=5} 의 결과가 다르다. 값은 문자열이거나 배열({@link LinkedHashMap})이다.
+     * PHP 의 이름 변환(공백 · 점을 {@code _} 로 바꾸기 등)은 옮기지 않았다.
+     */
+    private static Map<String, Object> parseQuery(String rawQuery) {
+        Map<String, Object> get = new HashMap<>();
+        if (rawQuery == null) {
+            return get;
+        }
+        for (String token : rawQuery.split("&")) {
+            if (token.isEmpty()) {
+                continue;
+            }
+            int equals = token.indexOf('=');
+            String name = urlDecode(equals < 0 ? token : token.substring(0, equals));
+            String value = equals < 0 ? "" : urlDecode(token.substring(equals + 1));
+            register(get, name, value);
+        }
+        return get;
+    }
+
+    /** {@code name=값} 은 기존 값을 덮어쓰고, {@code name[]} · {@code name[키]} 는 배열 요소로 넣는다(문자열이면 배열로 바뀐다). */
+    private static void register(Map<String, Object> get, String name, String value) {
+        int open = name.indexOf('[');
+        if (open < 0) {
+            get.put(name, value);
+            return;
+        }
+        String base = name.substring(0, open);
+        List<String> keys = bracketKeys(name, open);
+        if (base.isEmpty() || keys.isEmpty()) {
+            return;
+        }
+        Map<String, Object> array = get.get(base) instanceof LinkedHashMap<?, ?> existing
+            ? castArray(existing) : new LinkedHashMap<>();
+        get.put(base, array);
+        String key = keys.get(0).isEmpty() ? nextIndex(array) : keys.get(0);
+        array.put(key, keys.size() == 1 ? value : NESTED_ARRAY);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castArray(LinkedHashMap<?, ?> array) {
+        return (Map<String, Object>) array;
+    }
+
+    /** {@code name[a][b]} 에서 대괄호 안쪽 값들. 첫 대괄호가 닫히지 않으면 빈 목록(PHP 는 이름을 바꿔 다른 이름으로 본다). */
+    private static List<String> bracketKeys(String name, int open) {
+        List<String> keys = new ArrayList<>();
+        int start = open;
+        while (start < name.length() && name.charAt(start) == '[') {
+            int close = name.indexOf(']', start);
+            if (close < 0) {
+                break;
+            }
+            keys.add(name.substring(start + 1, close));
+            start = close + 1;
+        }
+        return keys;
+    }
+
+    /** {@code []} 로 덧붙일 키. 정수 키의 최댓값 + 1 이고 없거나 음수뿐이면 0 이다. */
+    private static String nextIndex(Map<String, Object> array) {
+        long next = 0;
+        for (String key : array.keySet()) {
+            if (PHP_INT_KEY.matcher(key).matches()) {
+                next = Math.max(next, Long.parseLong(key) + 1);
+            }
+        }
+        return Long.toString(next);
+    }
+
+    /** PHP urldecode 처럼 {@code +} 는 공백, {@code %XX} 는 바이트로 풀고, 16진수가 아닌 {@code %} 는 그대로 둔다. */
+    private static String urlDecode(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream decoded = new ByteArrayOutputStream(bytes.length);
+        for (int i = 0; i < bytes.length; i++) {
+            if (bytes[i] == '%' && i + HEX_DIGITS < bytes.length
+                && hexDigit(bytes[i + 1]) >= 0 && hexDigit(bytes[i + HEX_DIGITS]) >= 0) {
+                decoded.write(hexDigit(bytes[i + 1]) * HEX_RADIX + hexDigit(bytes[i + HEX_DIGITS]));
+                i += HEX_DIGITS;
+            } else {
+                decoded.write(bytes[i] == '+' ? ' ' : bytes[i]);
+            }
+        }
+        return decoded.toString(StandardCharsets.UTF_8);
+    }
+
+    private static int hexDigit(byte value) {
+        return Character.digit(value & BYTE_MASK, HEX_RADIX);
     }
 
     private static String keyword(String raw) {
